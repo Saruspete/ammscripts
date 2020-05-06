@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+[[ "$ammpath" == "fail" ]] && {
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git $MYPATH'"
+	exit 1
+}
+
+# Load the required libraries
+#ammLib::Requires "optparse"
