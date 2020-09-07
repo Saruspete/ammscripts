@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+[[ "$ammpath" == "fail" ]] && {
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git ${ammpaths[0]}'"
+	exit 1
+}
+
+
+# Root is required for listing and accessing many paths
+[[ "$__AMMLIB_USERID" != 0 ]] && ammLog::Die "You must run this script as root"
+
+
+ammLib::Require pkg chroot input optparse
+
+ammOptparse::AddOpt "-v|--version" "Show the version and exits"
+ammOptparse::AddOpt "-r|--root"    "Set the chroot path"         "" "ammString::IsPath"
+ammOptparse::AddOpt "--name"       "Set the name of chroot"
+ammOptparse::Parse
+
+ammInput::SetPrefix ""
+ammInput::Register "basedir" "Root dir where to create chroot" "$MYPATH/${0##*/}.dat"
+ammInput::Register "osvers"  "Version of the OS to install" "centos-7.5" "ammChroot::OSNameValidate"
+
+ammInput::Populate
+
+
+typeset CHR_NAME="$(ammInput::Get "osvers")"
+typeset CHR_BASE="$MYPATH/${0##*/}.dat/$CHR_NAME"
+
+
+function create {
+
+	# Create the chroot
+	ammChroot::Create "$CHR_BASE" "$CHR_NAME"
+	
+	# Populate it
+	#ammChroot::
+
+}
+
+
+function main {
+	create "$@"
+}
+
+main "$@"
