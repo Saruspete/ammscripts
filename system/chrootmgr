@@ -21,11 +21,14 @@ done
 
 ammLib::Require pkg chroot input optparse
 
-ammOptparse::AddOpt "-v|--version" "Show the version and exits"
+ammOptparse::AddOptGroupDesc "Chroot folders"
 ammOptparse::AddOpt "-r|--root"    "Set the chroot path"         "" "ammString::IsPath"
 ammOptparse::AddOpt "--name"       "Set the name of chroot"
-ammOptparse::Parse
 
+ammOptparse::AddActionWord "create|destroy|list|start|stop|enter"
+ammOptparse::Parse --no-unknown || ammLog::Die "Parsing error"
+
+# Register our input
 ammInput::SetPrefix ""
 ammInput::Register "basedir" "Root dir where to create chroot" "$MYPATH/${0##*/}.dat"
 ammInput::Register "osvers"  "Version of the OS to install" "centos-7.5" "ammChroot::OSNameValidate"
@@ -33,18 +36,25 @@ ammInput::Register "osvers"  "Version of the OS to install" "centos-7.5" "ammChr
 ammInput::Populate
 
 
+typeset 
+typeset chrootOsName="$(ammInput::Get "os-name")"
+typeset chrootOsVers="$(ammInput::Get "os-version")"
+
 typeset CHR_NAME="$(ammInput::Get "osvers")"
 typeset CHR_BASE="$MYPATH/${0##*/}.dat/$CHR_NAME"
 
 
-function create {
-
+function chroot_create {
 	# Create the chroot
 	ammChroot::Create "$CHR_BASE" "$CHR_NAME"
 	
 	# Populate it
 	#ammChroot::
 
+}
+
+function chroot_destroy {
+	
 }
 
 
