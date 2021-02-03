@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+#set -o nounset -o noclobber
+#export LC_ALL=C
+#export PATH="/bin:/sbin:/usr/bin:/usr/sbin:$PATH"
+#export PS4=' (${BASH_SOURCE##*/}:$LINENO ${FUNCNAME[0]:-main})  '
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+if [[ "$ammpath" == "fail" ]]; then
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git $MYPATH'"
+	exit 1
+fi
+
+
+typeset LM_OS_NAME="centos"
+typeset LM_OS_RELEASE="7"
+
+typeset LM_CHROOT="/livemigration"
+typeset LM_OLDINIT="$(readlink -f /proc/1/exe)"
+typeset LM_SSHD_PORT="222"
+
+
+typeset LM_PACKAGES="bash sshd"
+
+# Load the required libraries
+ammLib::Require "optparse" "chroot" "chroot.centos"
+ammExec::Require "tty"
+
+
+ammOptparse::AddOptGroup "migrate-prepare" "Preparation"
+ammOptparse::AddOpt "-d|--dest="      "Destination path"   "$LM_CHROOT"
+#ammOptparse::AddOpt "-b|--busybox=" "Busybox version"
+
+ammOptparse::AddOptGroup "migrate-connection" "Connectivity management"
+ammOptparse::AddOpt "-p|--ssh-port="  "SSH Port to listen to inside chroot" "$LM_SSHD_PORT"
+
+ammOptparse::AddOptGroup "migrate-os" "OS Version"
+ammOptparse::AddOpt "-o|--os="        "OS Name"        "$LM_OS_NAME"
+ammOptparse::AddOpt "-r|--release="   "OS Release"     "$LM_OS_RELEASE"
+
+ammOptparse::Parse --no-unknown || ammLog::Die "Error during option parsing"
+
+LM_CHROOT="$(ammOptparse::Get "dest")"
+LM_SSHD_PORT="$(ammOptparse::Get "ssh-port")"
+LM_OS_NAME="$(ammOptparse::Get "os")"
+LM_OS_RELEASE="$(ammOptparse::Get "release")"
+
+
+#
+# Give system information summary
+#
+
+
+
+#
+# Prepare the chroot
+#
+ammLog::StepBegin "Preparing chroot structure in '$LM_CHROOT'"
+#./busybox mount --bind /dev/pts dev/pts
+ammLog::Info "Creating base chroot ($LM_OS_NAME @ $LM_OS_RELEASE)"
+ammChroot::Create "$LM_CHROOT" "$LM_OS_NAME" "$LM_OS_RELEASE" || ammLog::Die "Error during chroot creation"
+
+ammLog::Info "Installing packages into chroot"
+
+
+ammLog::StepEnd
+
+
+
+
+#
+# Switch tty device
+#
+ammLog::StepBegin "Preparing switch to '$LM_CHROOT'"
+typeset ttycurr="$(tty)" fdlist=""
+
+# Switch opened fd to the current tty
+for fd in /proc/$$/fd/*; do
+	typeset fdnum="${fd##*/}"
+	if [[ "$(readlink -f $fd)" == "$ttycurr" ]]; then
+		# Change redir direction if stdin
+		typeset dir=">"
+		[[ "$fdnum" == "0" ]] && dir="<"
+		fdlist+=" ${fdnum}${dir}$LM_CHROOT$ttycurr "
+	fi
+done
+ammLog::Info "FD to reopen: $fdlist"
+
+#
+# Prepare init takeover
+#
+
+typeset LM_CHROOT_SYS="$LM_CHROOT/system"
+mkdir -p "$LM_CHROOT_SYS"
+ammLog::Info "Creating switchroot script '$LM_CHROOT_SYS/1-switchroot' (context: current system)"
+cat >| "$LM_CHROOT_SYS/1-switchroot" <<- EOT
+	#!$LM_CHROOT/bin/bash
+
+	typeset FAKEINIT="${LM_CHROOT_SYS#$LM_CHROOT}/2-fakeinit"
+
+	if ! [[ "\$\$" == "1" ]]; then
+	  echo "[!] This script must be called by your current init (pid 1)"
+	  exit 1
+	fi
+
+	export PATH="$LM_CHROOT/bin:$LM_CHROOT/sbin:$PATH"
+
+	# Close & reopen fd to new root
+	exec $fdlist
+	echo "[+] Starting takeover"
+	
+	echo "[+] remounting / as private"
+	mount --make-rprivate /
+	
+	echo "[+] pivoting root fs"
+	pivot_root $LM_CHROOT /oldroot
+
+	echo "[+] Reexec as fake init inside chroot"
+	exec $LM_CHROOT/bin/chroot $LM_CHROOT "\$FAKEINIT"
+	EOT
+chmod +x "$LM_CHROOT_SYS/1-switchroot"
+
+ammLog::Info "Creating fake init '$LM_CHROOT_SYS/2-fakeinit' (context: new chroot)"
+cat >| "$LM_CHROOT_SYS/2-fakeinit" <<-'EOT'
+	#!/bin/bash
+	# TODO: check for more conservative/safe flags
+
+	# Must be PID 1
+	[[ $$ -ne 1 ]] && exit 1
+
+	# Close all fd
+	typeset fdlist=""
+	for fd in /proc/$$/fd/*; do
+	  [[ "${fd##*/}" == "0" ]] && continue
+	  fdlist+="${fd##*/}>&- "
+	done
+	exec 0<&- $fdlist
+
+	# Never stop init (or kernel panic)
+	trap '' EXIT HUP INT TERM QUIT ILL ABRT TSTP USR1 USR2
+
+	# If some new step script are provided, run them
+	typeset scripts="$0.d"
+	if [[ -d "$0.d" ]]; then
+	  for s in $scripts/*; do
+	    $s 1>$s.log 2>$s.err &
+	    disown
+	  done
+	fi
+
+	# Reap all reparented child
+	while :; do wait; done
+	EOT
+chmod +x "$LM_CHROOT_SYS/2-fakeinit"
+
+
+typeset LM_INIT_SCRIPTS="$LM_CHROOT_SYS/2-fakeinit.d"
+ammLog::Info "Creating startup scripts in $LM_INIT_SCRIPTS"
+mkdir -p "$LM_INIT_SCRIPTS"
+
+ammLog::StepEnd
+
+
+#
+# Switch root
+#
+
+ammLog::StepBegin "Preparing ssh in new session"
+
+# Reopen fd
+exec $fdlist
+
+# Copy ssh config and keys
+ammLog::Info "Copying keys and config"
+mkdir -p "$LM_CHROOT/etc/ssh"
+ammPath::CopyStructure "/" "$LM_CHROOT" "/etc/ssh/ssh_host_*" "/root/.ssh"
+ammLog::Info "Executing sshd in new chroot"
+chroot "$LM_CHROOT" /usr/sbin/sshd -p $LM_SSHD_PORT
+
+ammLog::Info "You should be able to connect to ...:$LM_SSHD_PORT"
+ammLog::StepEnd
+
+
+
+exit 9
+
+ammLog::EchoSeparator "Will now switch root"
+
+# Mount the takeover script as current init image
+mount --bind "$LM_CHROOT/switchroot" "$LM_OLDINIT"
+# Ask current init to reload (so exec our fakeinit) (equiv to "systemctl daemon-reexec")
+telinit u
+
+# And we should be done here...
+ammLog::EchoSeparator "Init should have reexec. This script will now terminate"
+sleep 5
+
