@@ -336,7 +336,7 @@ function wgPeerAdd {
 	# Configure the iface
 	wg set "$iface" \
 		peer "$peerkey" \
-		endpoint "$peeraddr" \
+		${endpoint:+endpoint "$peeraddr"} \
 		${pskfile:+preshared-key $pskfile} \
 		${keepalive:+persistent-keepalive $keepalive} \
 		${ipallowed:+allowed-ips $ipallowed}
