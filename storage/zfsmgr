@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+[[ "$ammpath" == "fail" ]] && {
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git ${ammpaths[0]}'"
+	exit 1
+}
+
+# Load the required libraries
+ammLib::Require "optparse" "fs" "fs.zfs" "table"
+
+ammOptparse::AddOpt "--zfs-bin="   "Path to zfs binary"    "$(type -p zfs 2>/dev/null)"
+ammOptparse::AddOpt "--zpool-bin=" "Path to zpool binary"  "$(type -p zpool 2>/dev/null)"
+
+ammOptparse::AddOptGroupDesc "zpool management"
+ammOptparse::AddOpt "-p|--pool@"   "Act on specified zpools only"
+#ammOptparse::AddOpt ""
+
+ammOptparse::AddOptGroupDesc "dataset management"
+ammOptparse::AddOpt "-d|--dataset@" "Act on specified datasets only"
+
+ammOptparse::AddOptGroupDesc "Display options"
+ammOptparse::AddOpt "-i|--invert!"  "Invert columns/rows display" "false"
+ammOptparse::AddOpt "-a|--all!"     "Show all parameters"
+
+ammOptparse::AddActionWord "list|create|destroy|snapshot"
+
+ammOptparse::Parse --no-unknown || ammLog::Die "Parsing error"
+
+
+typeset zfsbin="$(ammOptparse::Get "zfs-bin")"
+typeset zpoolbin="$(ammOptparse::Get "zpool-bin")"
+typeset showInvert="$(ammOptparse::Get "invert")"
+typeset showAll="$(ammOptparse::Get "all")"
+
+# Default to smart listing
+typeset -a zfsDatasets
+typeset -A zfsProps zfsPropsCustom
+typeset zfsObjectLast=""
+
+#typeset filter="-s local,inherited,temporary,received,none"
+
+typeset name property value source
+while IFS=$'\t' read name property value source; do
+	typeset arrId="${name//\//_}"
+	if [[ "$name" != "$zfsObjectLast" ]]; then
+		zfsDatasets+=("$name")
+	fi
+
+	zfsProps[${arrId}_${property}]="$value"
+
+	# Add custom property
+	if $showAll || [[ "$source" != "default" ]]; then
+		zfsPropsCustom[$property]="${property}"
+	fi
+
+	zfsObjectLast="$name"
+done < <($zfsbin get -Hrp ${filter:-} all)
+
+#set -x
+
+# Create table
+typeset row col
+
+# Column = dataset, Row = feature
+if $showInvert; then
+	echo -n "DATASET"
+	for prop in "${!zfsPropsCustom[@]}"; do
+		echo -ne "\t${prop^^}"
+	done
+	echo
+
+	for dataset in "${zfsDatasets[@]}"; do
+		echo -ne "$dataset:"
+	
+		for prop in "${!zfsPropsCustom[@]}"; do
+			typeset colid="${dataset//\//_}_${prop}"
+			if (set +u; [[ -n "${zfsProps[$colid]}" ]]); then
+				echo -ne "\t${zfsProps[$colid]}"
+			else
+				echo -ne "\t(N/A)"
+			fi
+		done
+		echo
+	done
+
+# Column = dataset, Row = feature
+else
+	echo -n "Feature"
+	for dataset in "${zfsDatasets[@]}"; do
+		echo -ne "\t${dataset}"
+	done
+	echo
+
+	for prop in "${!zfsPropsCustom[@]}"; do
+		echo -ne "$prop:"
+		for dataset in "${zfsDatasets[@]}"; do
+			typeset colid="${dataset//\//_}_${prop}"
+			if (set +u; [[ -n "${zfsProps[$colid]}" ]]); then
+				echo -ne "\t${zfsProps[$colid]}"
+			else
+				echo -ne "\t(N/A)"
+			fi
+		done
+		echo
+	done
+fi
+
