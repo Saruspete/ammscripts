@@ -8,11 +8,11 @@ typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
 for ammpath in "${ammpaths[@]}" fail; do
 	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
 done
-[[ "$ammpath" == "fail" ]] && {
+if [[ "$ammpath" == "fail" ]]; then
 	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
 	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git ${ammpaths[0]}'"
 	exit 1
-}
+fi
 
 # Load the required libraries
-#ammLib::Requires "optparse"
+#ammLib::Require "optparse"
