@@ -14,6 +14,10 @@ done
 	exit 1
 }
 
+typeset LOG_QUIET="false"
+typeset OUT_CSV="false"
+typeset OUT_FILE=""
+
 
 ammLib::Require "table" "optparse" "syscfg" "syscfg.network" "network" "string" "hardware"
 
@@ -21,6 +25,18 @@ ammLib::Require "table" "optparse" "syscfg" "syscfg.network" "network" "string" 
 if [[ "$__AMMLIB_USERID" != "0" ]]; then
 	ammLog::Wrn "You are not running this script as root. Some detail may be missing"
 fi
+
+ammOptparse::AddOpt "--quiet!" "Should the non-data information be displayed" "$LOG_QUIET"
+
+ammOptparse::AddOptGroupDesc "Output formatting"
+ammOptparse::AddOpt "--csv!"   "Format output as CSV"     "$OUT_CSV"
+ammOptparse::AddOpt "--file="  "File to place output in"  "$OUT_FILE"
+
+
+ammOptparse::Parse --no-unknown || ammLog::Die "Bad options provided"
+
+OUT_CSV="$(ammOptparse::Get "csv")"
+OUT_FILE="$(ammOptparse::Get "file")"
 
 
 function _ramSizeConvert {
