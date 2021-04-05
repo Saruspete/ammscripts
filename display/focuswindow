@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 2>/dev/null || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+if [[ "$ammpath" == "fail" ]]; then
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git $MYPATH'"
+	exit 1
+fi
+
+# Load the required libraries
+#ammLib::Require "optparse"
+
+function getParent {
+	typeset pid="$1"
+	awk '$1 == "PPid:"{ print $2}' /proc/$pid/status
+}
+
+function windowActivate {
+	typeset wid="$1"
+	if type -p "wmctrl" >/dev/null; then
+		wmctrl -ia "$wid"
+		return $?
+	elif type -p "xdotool" >/dev/null; then
+		xdotool windowactivate "$wid"
+		return $?
+	else
+		echo >&2 "Cannot find wmctrl nor xdotool. Stopping"
+		exit 1
+	fi
+}
+function windowList {
+	if type -p "wmctrl" >/dev/null; then
+		wmctrl -l | awk '{ print $1 }'
+	elif type -p "xdotool" >/dev/null; then
+		xdotool search --onlyvisible . 2>/dev/null
+	else
+		echo >&2 "Cannot find xdotool nor wmctrl. Stopping"
+		exit 1
+	fi
+}
+function windowGetPid {
+	typeset wid="$1"
+
+	if type -p "xprop" >/dev/null; then
+		typeset wpid="$(xprop -id "$wid" _NET_WM_PID)"
+		echo "${wpid##* }"
+	elif type -p "xdotool" >/dev/null; then
+		xdotool getwindowpid "$wid" 2>/dev/null
+	else
+		echo >&2 "Cannot find xprop nor xdotool. Stopping"
+		exit 1
+	fi
+}
+
+# List all window, and their associated PID
+typeset -A pid2window
+for wid in $(windowList); do
+	typeset wpid="$(windowGetPid "$wid")"
+	if [[ -n "$wpid" ]]; then
+		pid2window[$wpid]+="$wid "
+	fi
+done
+
+if [[ $# -ne 1 ]]; then
+	cat <<-EOT
+		Usage: $0 <pid>
+
+		Will focus the window hosting the provided PID.
+		Requires at least xdotool or wmctrl to work.
+		EOT
+	exit 0
+fi
+
+typeset pid="$1"
+# Take our target pid and check it and its parents until we find a window
+while [[ -n "$pid" ]] && [[ -e "/proc/$pid/" ]]; do
+
+	if (set +u; [[ -n "${pid2window[$pid]}" ]] ); then
+		for wid in ${pid2window[$pid]}; do
+			echo "Trying to activate window $wid (pid $pid)"
+			windowActivate $wid && exit 0
+		done
+		exit $?
+	fi
+
+	echo "No window matched pid $pid. Trying its parent"
+	pid=$(getParent "$pid")
+done
+
+exit 1
