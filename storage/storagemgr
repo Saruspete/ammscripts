@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+[[ "$ammpath" == "fail" ]] && {
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git ${ammpaths[0]}'"
+	exit 1
+}
+
+# Load the required libraries
+ammLib::Require "optparse" "table" "storage"
+
+typeset -a COLS=(
+	# Identification
+	"name" "type" "size" "model" "serial"
+	# Filesystem
+#	"fs" "mountpoint"
+)
+
+typeset -A COLSDEF=(
+	[name]="Name"
+	[type]="Type|size:8"
+	[size]="Size"
+	[model]="Model|size:32"
+	[serial]="Serial|size:16"
+	[majmin]="Maj:Min"
+	[fs]="FS"
+	[mountpoint]="MountPoint"
+)
+
+# Parsing options
+ammOptparse::AddOptGroupDesc "Listing options"
+ammOptparse::AddOpt "-t|--tree"    "Display volumes in tree"
+ammOptparse::AddOpt "-H|--hard"    "Display hardware details"
+ammOptparse::AddOpt "-f|--fields=" "Fields to display"        
+
+ammOptparse::AddActionWord "list|erase|reset|rediscover"
+
+
+ammOptparse::Parse --no-unknown || ammLog::Die "Error during options parsing"
+
+
+# Display
+
+
+function storageShow {
+	typeset -a COLSDEFTABLE=()
+	typeset field
+	for field in ${COLS[@]}; do
+		COLSDEFTABLE+=("${COLSDEF[$field]}")
+	done
+
+	ammTable::Create "Storage Devices" "${COLSDEFTABLE[@]}"
+
+	typeset storeName
+	for storeName in $(ammStorage::ListAvail); do
+
+		typeset storename="$(ammStorage::GetKernelName "$storeName")"
+
+		# Create the row data
+		unset coldata
+		typeset -a coldata
+		typeset col
+		for col in ${COLS[@]}; do
+
+			# Add the column data
+			case $col in
+				name)       coldata+=("$storeName")   ;;
+				type)       coldata+=("$(ammStorage::GetType "$storeName")") ;;
+				size)       coldata+=("$(ammStorage::GetSize "$storeName")") ;;
+				model)      coldata+=("$(ammStorage::GetModel "$storeName")") ;;
+				serial)     coldata+=("$(ammStorage::GetSerial "$storeName")") ;;
+				majmin)     coldata+=("$(ammStorage::GetMajorMinor "$storeName")") ;;
+				mountpoint) coldata+=("$(ammStorage::GetMountpoint "$storeName")") ;;
+				fs)         coldata+=("$(ammStorage::GetFstype "$storeName")") ;;
+				*)          ammLog::Error "Unknown column: '$col'" ;;
+			esac
+		done
+
+		ammTable::AddRow "${coldata[@]}"
+	done
+
+	ammTable::Display
+}
+
+storageShow
