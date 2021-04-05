@@ -8,22 +8,35 @@ typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
 for ammpath in "${ammpaths[@]}" fail; do
 	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
 done
-[[ "$ammpath" == "fail" ]] && {
+if [[ "$ammpath" == "fail" ]]; then
 	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
 	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git ${ammpaths[0]}'"
 	exit 1
-}
+fi
 
 
 # Root is required for listing and accessing many paths
 [[ "$__AMMLIB_USERID" != 0 ]] && ammLog::Die "You must run this script as root"
 
 
-ammLib::Require pkg chroot input optparse
+ammLib::Require "pkg" "chroot" "input" "optparse"
+
+ammOptparse::AddOptGroupDesc "Configuration"
+ammOptparse::AddOpt "-c|--config"  "Load config from file"       ""
+ammOptparse::AddOpt "-s|--save"    "Save current state as file"  "%{root}/%{name}.cfg"
+
+# Early configuration parsing for help pre-filling
+ammOptparse::Parse "config"
+typeset CFG_FILE="$(ammOptparse::Get "config")"
+
+if [[ -n "$CFG_FILE" ]]; then
+	:
+fi
+
 
 ammOptparse::AddOptGroupDesc "Chroot folders"
-ammOptparse::AddOpt "-r|--root"    "Set the chroot path"         "" "ammString::IsPath"
-ammOptparse::AddOpt "--name"       "Set the name of chroot"
+ammOptparse::AddOpt "-r|--root"    "Set the chroot path"         "$h" "ammString::IsPath"
+ammOptparse::AddOpt "-n|--name"    "Set the name of chroot"      ""
 
 ammOptparse::AddActionWord "create|destroy|list|start|stop|enter"
 ammOptparse::Parse --no-unknown || ammLog::Die "Parsing error"
@@ -36,7 +49,6 @@ ammInput::Register "osvers"  "Version of the OS to install" "centos-7.5" "ammChr
 ammInput::Populate
 
 
-typeset 
 typeset chrootOsName="$(ammInput::Get "os-name")"
 typeset chrootOsVers="$(ammInput::Get "os-version")"
 
