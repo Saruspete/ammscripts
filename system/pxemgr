@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+if [[ "$ammpath" == "fail" ]]; then
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git ${ammpaths[0]}'"
+	exit 1
+fi
+
+# Load the required libraries
+ammLib::Require "optparse"
+
+
+cat >/dev/null <<-EOT
+== Tutorials
+https://www.geoffray-levasseur.org/tutoriels-2/un-pxe-pour-les-unir-tous/
+https://gdidees.eu/userfiles/file/docs/Guide%20de%20deploiement%20Windows10-ter.pdf
+
+https://musteresel.github.io/posts/2018/04/install-windows-over-pxe-with-dnsmasq-pxelinux-winpe.html
+https://alexandre-laurent.developpez.com/articles/demarrage-systeme-reseau-pxe/#LIII-B
+https://wiki.debian-fr.xyz/PXE_avec_support_EFI
+https://linux.xvx.cz/2010/04/pxe-server-using-dnsmasq-and.html
+
+
+== Documentation
+https://wiki.syslinux.org/wiki/index.php?title=PXE_native_boot_menu
+https://wiki.syslinux.org/wiki/index.php?title=MEMDISK#Windows_PE_based
+https://wimlib.net/
+https://wiki.archlinux.org/index.php/Windows_PE
+http://rpm.pbone.net/manpage_idpl_55675622_numer_1_nazwa_mkwinpeimg.html
+
+
+
+EOT
+
+
+
+typeset PXE_ROOT="/home/pxe"
+
+
+
+ammOptparse::AddOptGroup "pxeroot" "PXE Base folder definition"
+ammOptparse::AddOpt "-r|--root="   "Root folder for all data"    "$PXE_ROOT"
+
+
+
+
+PXE_ROOT="$(ammOptparse::Get "root")"
+
+
+
+
+function pxe::CreateStructure {
+	typeset root="$1"
+
+	typeset -a folders=(
+		tftp/{bios,efi32,efi64,ipxe}
+		images/{windows,linux}
+		http/kickstart
+	)
+
+	# Creating root
+	if ! [[ -d "$root" ]] && ! mkdir "$root"; then
+		ammLog::Die "Unable to create root folder '$root'"
+	fi
+
+	typeset folder
+	typeset -i r=0
+	for folder in "${folders[@]}"; do
+		# Creating
+		if ! [[ -d" $root/$folder" ]]; then
+			ammLog::Debug "Creating '$root/$folder'"
+			if ! mkdir "$root/$folder"; then
+				ammLog::Error "Unable to create folder '$root/$folder'"
+				r+=1
+			fi
+		fi
+	done
+
+	return $r
+}
+
+
+
