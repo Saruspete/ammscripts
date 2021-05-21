@@ -38,7 +38,7 @@ ammOptparse::AddOptGroupDesc "Chroot folders"
 ammOptparse::AddOpt "-r|--root"    "Set the chroot path"         "$h" "ammString::IsPath"
 ammOptparse::AddOpt "-n|--name"    "Set the name of chroot"      ""
 
-ammOptparse::AddActionWord "create|destroy|list|start|stop|enter"
+ammOptparse::AddActionWord "continue" "create" "destroy" "list" "start" "stop" "enter"
 ammOptparse::Parse --no-unknown || ammLog::Die "Parsing error"
 
 # Register our input

@@ -31,7 +31,7 @@ ammOptparse::AddOptGroupDesc "Display options"
 ammOptparse::AddOpt "-i|--invert!"  "Invert columns/rows display" "false"
 ammOptparse::AddOpt "-a|--all!"     "Show all parameters"
 
-ammOptparse::AddActionWord "list|create|destroy|snapshot"
+ammOptparse::AddActionWord "continue" "list" "create" "destroy" "snapshot"
 
 ammOptparse::Parse --no-unknown || ammLog::Die "Parsing error"
 

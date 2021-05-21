@@ -41,7 +41,7 @@ ammOptparse::AddOpt "-t|--tree"    "Display volumes in tree"
 ammOptparse::AddOpt "-H|--hard"    "Display hardware details"
 ammOptparse::AddOpt "-f|--fields=" "Fields to display"        
 
-ammOptparse::AddActionWord "list|erase|reset|rediscover"
+ammOptparse::AddActionWord "continue" "list" "erase" "reset" "rediscover"
 
 
 ammOptparse::Parse --no-unknown || ammLog::Die "Error during options parsing"
