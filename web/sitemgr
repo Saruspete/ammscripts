@@ -27,7 +27,6 @@ typeset HTTPS_FORCE="false"
 typeset HTTPS_PROVIDER="certbot"
 typeset SVC_NGINX="nginx"
 typeset SVC_PHPFPM="php-fpm"
-typeset 
 
 
 ammOptparse::AddOptGroupDesc "Environment management"
@@ -45,7 +44,7 @@ ammOptparse::AddOpt    "--https-enable!"   "Should https be enabled"            
 ammOptparse::AddOpt    "--https-force!"    "Should https be forcefully enabled" "$HTTPS_FORCE"
 ammOptparse::AddOpt    "--https-provider=" "HTTPS certificate provider"         "$HTTPS_PROVIDER"
 
-ammOptparse::AddActionWord "create" "stop" "start"
+ammOptparse::AddActionWord "continue" "create" "stop" "start"
 
 if ! ammOptparse::Parse; then
 	ammLog::Die "Parsing error"
