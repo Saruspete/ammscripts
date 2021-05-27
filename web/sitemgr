@@ -1,0 +1,304 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(readlink -e $0 || realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/../lib/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+[[ "$ammpath" == "fail" ]] && {
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git ${ammpaths[0]}'"
+	exit 1
+}
+
+# Load the required libraries
+ammLib::Require "optparse" "string"
+
+
+# Default values
+typeset SITES_ROOT="/home/www/sites"
+typeset PATH_TEMP="$(ammLib::TmpPathGet)"
+
+typeset HTTPS_ENABLE="true"
+typeset HTTPS_FORCE="false"
+typeset HTTPS_PROVIDER="certbot"
+typeset SVC_NGINX="nginx"
+typeset SVC_PHPFPM="php-fpm"
+typeset 
+
+
+ammOptparse::AddOptGroupDesc "Environment management"
+ammOptparse::AddOpt "-r|--root="           "Where the sites are located"   "$SITES_ROOT"
+ammOptparse::AddOpt "-t|--temp="           "Path for temporary files"      "$PATH_TEMP"
+
+ammOptparse::AddOptGroupDesc "Service management"
+ammOptparse::AddOpt    "--svc-nginx="      "Name of the nginx service"    "$SVC_NGINX"
+ammOptparse::AddOpt    "--svc-phpfpm="     "Name of the phpfpm service"   "$SVC_PHPFPM"
+ammOptparse::AddOpt    "--run-nginx-user="   "User to run the nginx as"   ""
+ammOptparse::AddOpt    "--run-phpfpm-user="  "User to run phpfpm as"      "%{run-nginx-user}"
+
+ammOptparse::AddOptGroupDesc "HTTPS management"
+ammOptparse::AddOpt    "--https-enable!"   "Should https be enabled"            "$HTTPS_ENABLE"
+ammOptparse::AddOpt    "--https-force!"    "Should https be forcefully enabled" "$HTTPS_FORCE"
+ammOptparse::AddOpt    "--https-provider=" "HTTPS certificate provider"         "$HTTPS_PROVIDER"
+
+ammOptparse::AddActionWord "create" "stop" "start"
+
+if ! ammOptparse::Parse; then
+	ammLog::Die "Parsing error"
+fi
+
+# Get options values
+SITES_ROOT="$(ammOptparse::Get "root")"
+PATH_TEMP="$(ammOptparse::Get "temp")"
+
+SVC_NGINX="$(ammOptparse::Get "svc-nginx")"
+SVC_PHPFPM="$(ammOptparse::Get "svc-phpfpm")"
+
+HTTPS_ENABLE="$(ammOptparse::Get "https-enable")"
+HTTPS_FORCE="$(ammOptparse::Get "https-force")"
+HTTPS_PROVIDER="$(ammOptparse::Get "https-provider")"
+
+mkdir -p "$PATH_TEMP"
+
+# Update args
+eval set -- $(ammOptparse::GetUnparsedOpts)
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+function fqdnReverse {
+
+	typeset site
+	for site in "$@"; do
+		typeset -a parts=(${site//./ })
+		typeset sitepath="" part
+		for part in ${parts[@]}; do
+			# Prepend the part and a separator if not empty
+			sitepath="$part${sitepath:+.}$sitepath"
+		done
+		echo "$sitepath"
+	done
+}
+
+function dnsResolve {
+	typeset fqdn="$1"
+
+	getent hosts "$fqdn" | awk '{print $2}'
+}
+
+
+function svcExec {
+	typeset action="$1"; shift
+
+	# systemd
+	if ammExec::Exists "systemctl"; then
+		ammExec::AsUser "root" systemctl "$action" "$@"
+	# OpenRC
+	elif ammExec::Exists "rc-service"; then
+		typeset svc
+		for svc in "$@"; do
+			ammExec::AsUser "root" rc-service "$svc" "$action"
+		done
+	# Standard wrapper
+	elif ammExec::Exists "service"; then
+		typeset svc
+		for svc in "$@"; do
+			ammExec::AsUser "root" rc-service "$svc" "$action"
+		done
+	else
+		ammLog::Error "Unmanaged service management"
+	fi
+
+}
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+function pathCreate {
+	typeset sitesroot="$1"
+	typeset fqdn="$2"
+
+	typeset dirname="$(fqdnReverse "$fqdn")"
+
+	# Create folders
+	ammLog::Inf "Creating folders for '$fqdn' in '$sitesroot/$dirname'"
+	typeset dir
+	for dir in bin cron conf/nginx html/public logs/{nginx,apps} priv temp/{temp,nginx,client_body,upload,session}; do
+		typeset dirpath="$sitesroot/$dirname/$dir"
+		[[ -d "$dirpath" ]] || mkdir --parents "$dirpath" 
+	done
+
+	# Return root folder path
+	echo "$sitesroot/$dirname"
+}
+
+
+function confGenNginx {
+	typeset siteroot="$1"
+	typeset sitefqdn="$2"
+
+	typeset -i r=0
+	typeset -A mapping=(
+		[nginx.site.common.conf.sh]="$siteroot/conf/nginx.common.conf"
+		[nginx.site.conf.sh]="$siteroot/conf/nginx.conf"
+	)
+
+	typeset scriptname
+	for scriptname in "${!mapping[@]}"; do
+		typeset dest="${mapping[$scriptname]}"
+		typeset temp="$PATH_TEMP/${dest##*/}.$$"
+
+		typeset script="$MYPATH/templates/$scriptname"
+		typeset https_avail="false"
+		typeset http_avail="true"
+
+		
+		if ( ammString::IsTrue "$HTTPS_ENABLE" && [[ -s "$siteroot/priv/privkey.pem" ]] ) || ammString::IsTrue "$HTTPS_FORCE"; then
+			ammLog::Info "Enabling https for domain '$fqdn'"
+			https_avail="true"
+			http_avail="false"
+		fi
+
+		# Call the script
+		SITE_ROOT="$siteroot" \
+		SITE_FQDN="$sitefqdn" \
+		HTTP_ALLOWED="$http_avail" \
+		HTTPS_ENABLED="$https_avail" \
+		"$script" >| "$temp"
+
+		# check updates and backup if needed
+		if [[ -s "$dest" ]]; then
+			typeset diff="$(diff "$dest" "$temp")"
+			if [[ -n "$diff" ]]; then
+				cp "$dest" "$dest.bck.$(date +%s)"
+			else
+				ammLog::Info "No change for '$dest'. Skipping"
+				continue
+			fi
+		fi
+
+		# Place new version (use cp to change content, not inode)
+		cp "$temp" "$dest"
+	done
+
+	return $r
+}
+
+function confGenPhpfpm {
+:
+}
+
+
+
+
+
+# =============================================================================
+# PKI / HTTPS Certificate
+# =============================================================================
+
+function certRequest {
+
+	if [[ -z "$HTTPS_PROVIDER" ]] || ! ammExec::Exists "$HTTPS_PROVIDER"; then
+		ammLog::Error "Unavailable certificate provider '$HTTPS_PROVIDER'"
+		return 1
+	fi
+
+	typeset domains="$(ammString::Glue "," "$@")"
+	$HTTPS_PROVIDER -d "$domains" run
+}
+
+function certDeploy {
+	typeset fqdn="$1"
+	typeset destdir="$2"
+	typeset certdir="${3:-$fqdn}"
+	
+	# Only letsencrypt is handled for now
+	typeset crt
+	for crt in "/etc/letsencrypt/live/$certdir/"*; do
+		# Avoid empty 
+		[[ -e "$crt" ]] || return 1
+
+		ln -s "$crt" "$destdir"
+	done
+
+}
+
+
+
+# =============================================================================
+# Main processing
+# =============================================================================
+
+function siteCreate {
+	typeset fqdn="$1"; shift
+
+	typeset -i r=0
+
+	# Create base folder
+	typeset sitepath="$(pathCreate "$SITES_ROOT" "$fqdn")"
+
+	if [[ -z "$sitepath" ]]; then
+		ammLog::Err "Empty target path returned for site '$fqdn'"
+		return 1
+	fi
+
+	# Place configuration templates
+	confGenNginx  "$sitepath" "$fqdn" ; r+=$?
+	confGenPhpfpm "$sitepath" "$fqdn" ; r+=$?
+
+	if [[ $r -ne 0 ]]; then
+		ammLog::Err "Configuration generation for '$fqdn' failed (return $r)"
+		return $r
+	fi
+
+	# Reload to enable the domain
+	svcExec "reload" "nginx"
+
+	
+	# https enabled / available
+	if ammString::IsTrue "$HTTPS_ENABLE" || ammString::IsTrue "$HTTPS_FORCE"; then
+		# Request https cert
+		certRequest "$fqdn"
+		certDeploy "$fqdn" "$sitepath/priv"
+
+		# Recreate the configuration
+		confGenNginx "$sitepath" "$fqdn"
+
+		# Reload
+		svcExec "reload" "nginx"
+	fi
+
+	return $r
+}
+
+
+typeset -i r=0
+typeset action="${1:-}"; shift
+case $action in
+	create)
+		typeset site
+		for site in "$@"; do
+			siteCreate "$site"
+			r+=$?
+		done
+		;;
+	update)
+		ammLog::Info "TODO ..."
+		;;
+
+	*)
+		echo >&2 "Usage: $0 [options] <create|update|backup> [domain]"
+		r=1
+		;;
+esac
+
+
+exit $r
