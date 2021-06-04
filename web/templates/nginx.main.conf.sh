@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 
-cat <<'EOT'
+cat <<EOT
 
-user              {{ http_data_user }} {{ http_data_group }};
+user              $SITE_USER $SITE_GROUP;
 worker_processes  auto;
 
 error_log         /var/log/nginx/error.log;
@@ -20,10 +20,10 @@ http {
 	include          /etc/nginx/mime.types;
 	default_type     application/octet-stream;
 	log_format main
-	  '$remote_addr - $remote_user [$time_local] '
-	  '"$request" $status $bytes_sent '
-	  '"$http_referer" "$http_user_agent" '
-	  '"$http_x_forwarded_for" "$gzip_ratio"';
+	  '\$remote_addr - \$remote_user [\$time_local] '
+	  '"\$request" \$status \$bytes_sent '
+	  '"\$http_referer" "\$http_user_agent" '
+	  '"\$http_x_forwarded_for" "\$gzip_ratio"';
 
 	client_header_timeout       10m;
 	client_body_timeout         10m;
@@ -60,7 +60,7 @@ http {
 	ssl_session_tickets         off;
 	ssl_stapling                on;
 	ssl_stapling_verify         on;
-#    resolver                    $DNS-IP-1 $DNS-IP-2 valid=300s;
+#    resolver                    \$DNS-IP-1 \$DNS-IP-2 valid=300s;
 #    resolver_timeout            5s;
 #    add_header                  Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
 	# https://developer.mozilla.org/en-US/docs/HTTP/X-Frame-Options
@@ -71,7 +71,7 @@ http {
 	add_header                  X-Robots-Tag none;
 
 	index                       index.html;
-	include                     {{ http_data_dir }}/*/conf/nginx.conf;
+	include                     $SITES_ROOT/*/conf/nginx.conf;
 
 }
 

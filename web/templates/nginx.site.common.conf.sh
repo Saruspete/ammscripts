@@ -16,6 +16,7 @@ cat <<-EOT
 	
 	index           index.html index.htm index.php;
 	
+	proxy_temp_path           $SITE_ROOT/temp/nginx/proxy_temp 1 2;
 	# Store all elements in local path
 	client_body_temp_path     $SITE_ROOT/temp/nginx/client_body 1 2;
 	# For reading client request. In case of long cookies
@@ -25,12 +26,18 @@ cat <<-EOT
 	
 	# Special files
 	location = /favicon.ico {
-		log_not_found   off;
-		access_log      off;
+	    log_not_found   off;
+	    access_log      off;
 	}
 	
 	location ~ /\.ht {
-		deny all;
+	    deny all;
+	}
+	
+	location /nginx_status {
+	    stub_status;
+	    allow 127.0.0.1;
+	    deny all;
 	}
 	
 	
