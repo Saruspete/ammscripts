@@ -1,10 +1,6 @@
+#!/usr/bin/env bash
 
-
-# TODO: Fix this per distribution
-typeset fpmCfgDst="/etc/php-fpm.conf"
-
-
-cat >| "$fpmCfgDst" <<-EOT
+cat <<-EOT
 
 ;;;;;;;;;;;;;;;;;;;;;
 ; FPM Configuration ;
