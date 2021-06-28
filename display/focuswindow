@@ -15,54 +15,18 @@ if [[ "$ammpath" == "fail" ]]; then
 fi
 
 # Load the required libraries
-#ammLib::Require "optparse"
+ammLib::Require "x11"
 
 function getParent {
 	typeset pid="$1"
 	awk '$1 == "PPid:"{ print $2}' /proc/$pid/status
 }
 
-function windowActivate {
-	typeset wid="$1"
-	if type -p "wmctrl" >/dev/null; then
-		wmctrl -ia "$wid"
-		return $?
-	elif type -p "xdotool" >/dev/null; then
-		xdotool windowactivate "$wid"
-		return $?
-	else
-		echo >&2 "Cannot find wmctrl nor xdotool. Stopping"
-		exit 1
-	fi
-}
-function windowList {
-	if type -p "wmctrl" >/dev/null; then
-		wmctrl -l | awk '{ print $1 }'
-	elif type -p "xdotool" >/dev/null; then
-		xdotool search --onlyvisible . 2>/dev/null
-	else
-		echo >&2 "Cannot find xdotool nor wmctrl. Stopping"
-		exit 1
-	fi
-}
-function windowGetPid {
-	typeset wid="$1"
-
-	if type -p "xprop" >/dev/null; then
-		typeset wpid="$(xprop -id "$wid" _NET_WM_PID)"
-		echo "${wpid##* }"
-	elif type -p "xdotool" >/dev/null; then
-		xdotool getwindowpid "$wid" 2>/dev/null
-	else
-		echo >&2 "Cannot find xprop nor xdotool. Stopping"
-		exit 1
-	fi
-}
 
 # List all window, and their associated PID
 typeset -A pid2window
-for wid in $(windowList); do
-	typeset wpid="$(windowGetPid "$wid")"
+for wid in $(ammX11::WindowList); do
+	typeset wpid="$(ammX11::WindowGetPid "$wid")"
 	if [[ -n "$wpid" ]]; then
 		pid2window[$wpid]+="$wid "
 	fi
@@ -85,7 +49,7 @@ while [[ -n "$pid" ]] && [[ -e "/proc/$pid/" ]]; do
 	if (set +u; [[ -n "${pid2window[$pid]}" ]] ); then
 		for wid in ${pid2window[$pid]}; do
 			echo "Trying to activate window $wid (pid $pid)"
-			windowActivate $wid && exit 0
+			ammX11::WindowActivate $wid && exit 0
 		done
 		exit $?
 	fi
