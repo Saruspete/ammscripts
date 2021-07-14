@@ -19,13 +19,13 @@ fi
 [[ "$__AMMLIB_USERID" != 0 ]] && ammLog::Die "You must run this script as root"
 
 
-ammLib::Require "pkg" "chroot" "input" "optparse" "table"
+ammLib::Require "pkg" "chroot" "optparse"
 #ammLib::Require "chroot.centos"
 
 
-ammOptparse::AddOptGroupDesc "Configuration"
-ammOptparse::AddOpt "-c|--config"  "Load config from file"       ""
-ammOptparse::AddOpt "-s|--save"    "Save current state as file"  "%{base}/%{name}.cfg"
+#ammOptparse::AddOptGroupDesc "Configuration"
+#ammOptparse::AddOpt "-c|--config"  "Load config from file"       ""
+#ammOptparse::AddOpt "-s|--save"    "Save current state as file"  "%{base}/%{name}.cfg"
 
 # Early configuration parsing for help pre-filling
 ammOptparse::Parse "config"
@@ -36,51 +36,33 @@ if [[ -n "$CFG_FILE" ]]; then
 fi
 
 
-function chrootmgr::NameIsValid {
-	typeset name="$1"
-	[[ -z "$name" ]] && return 1
-	[[ "${name////}" != "$name" ]] && return 1
-	#ammPath::IsValid "$name" 
-	return 0
-}
 
-typeset CHR_BASE="$MYPATH/${0##*/}.dat"
 typeset CHR_OSNAME_AVAIL="$(ammChroot::OSNameList)"
-typeset CHR_ROOTFS_DIRNAME="rootfs"
 
-ammOptparse::AddOptGroupDesc "Chroot base options"
-ammOptparse::AddOpt "-b|--base="    "Path to the base storage"    "$CHR_BASE"        "ammPath::IsValid"
-ammOptparse::AddOpt "-n|--name="    "Name of the chroot"          ""                 "chrootmgr::NameIsValid"
+#ammOptparse::AddOptGroup "mount" "Mount-related options"
+
 
 # This group is only visible for create action
-ammOptparse::AddOptGroup "creation" "Creation specific options" "word:create"
-ammOptparse::AddOpt "--os-name="    "Name of the OS (avail: ${CHR_OSNAME_AVAIL})" ""   "ammChroot::OSNameValidate"
-ammOptparse::AddOpt "--os-version=" "Version (release) of the OS"
-ammOptparse::AddOpt "-p|--packages@" "List of packages or binaries to install"    ""
-ammOptparse::AddOpt "--kernel-version="  "Kernel version returned by 'uname -r'"
-ammOptparse::AddOpt "--kernel-sources@"  "Kernel sources to be installed"
+ammOptparse::AddOptGroup "create" "Options for 'create' action"
+ammOptparse::AddOpt    "--os-name="         "Name of the OS (avail: ${CHR_OSNAME_AVAIL})" ""   "ammChroot::OSNameValidate"
+ammOptparse::AddOpt    "--os-version="      "Version (release) of the OS"
+#ammOptparse::AddOpt "-p|--packages@"        "List of packages or binaries to install"    ""
+#ammOptparse::AddOpt    "--kernel-version="  "Kernel version returned by 'uname -r'"
+#ammOptparse::AddOpt    "--kernel-sources@"  "Kernel sources to be installed"
 
 
-ammOptparse::AddOptGroupDesc "Non-standard overrides"
-ammOptparse::AddOpt "--rootfsname=" "Set the rootfs mountdir name"  "$CHR_ROOTFS_DIRNAME"
-
-
-ammOptparse::AddActionWord "break" "stop" "start" "destroy" "list" "enter"
-ammOptparse::AddActionWord "continue" "create" "update"
+ammOptparse::AddActionWord "break" "stop" "start" "destroy" "enter" "exec"
+ammOptparse::AddActionWord "continue" "create"
 #ammOptparse::RequireOrAsk "--name" # "--os-name" "--os-version"
 #ammOptparse::RequireOrAskForWord "create" "--os-name" "--os-version"
 
-ammOptparse::Parse --no-unknown || ammLog::Die "Parsing error"
+ammOptparse::Parse || ammLog::Die "Parsing error"
 
 
-CHR_BASE="$(ammOptparse::Get "base")"
-CHR_ROOTFS_DIRNAME="$(ammOptparse::Get "rootfsname")"
-typeset CHR_NAME="$(ammOptparse::Get "name")"
 typeset CHR_OSNAME="$(ammOptparse::Get "os-name")"
 typeset CHR_OSVERS="$(ammOptparse::Get "os-version")"
-
-
-typeset CHR_ROOTDIR="$CHR_BASE/$CHR_NAME/$CHR_ROOTFS_DIRNAME"
+#typeset CHR_KRNVERS="$(ammOptparse::Get "kernel-version")"
+#typeset CHR_KRNSRCS=
 
 
 function chrootmgr::list {
@@ -89,6 +71,7 @@ function chrootmgr::list {
 }
 
 function chrootmgr::create {
+	typeset chrootDir="$1"
 
 	# Checks
 	if ! ammChroot::OSNameValidate "$CHR_OSNAME"; then
@@ -96,10 +79,10 @@ function chrootmgr::create {
 		return 1
 	fi
 
-	ammLog::StepBegin "Creating chroot '$CHR_OSNAME-$CHR_OSVERS' in '$CHR_ROOTDIR'"
+	ammLog::StepBegin "Creating chroot '$CHR_OSNAME-$CHR_OSVERS' in '$chrootDir'"
 	# Create the chroot
-	if ! ammChroot::Create "$CHR_ROOTDIR" "$CHR_OSNAME" "$CHR_OSVERS"; then
-		ammLog::Error "Error during chroot creation on '$CHR_ROOTDIR' os '$CHR_OSNAME' version '$CHR_OSVERS'"
+	if ! ammChroot::Create "$chrootDir" "$CHR_OSNAME" "$CHR_OSVERS"; then
+		ammLog::Error "Error during chroot creation on '$chrootDir' os '$CHR_OSNAME' version '$CHR_OSVERS'"
 		ammLog::StepEnd 1
 		return 1
 	fi
@@ -109,8 +92,10 @@ function chrootmgr::create {
 }
 
 function chrootmgr::destroy {
-	ammChroot::Stop "$CHR_BASE"
-	ammChroot::Destroy "$CHR_BASE"
+	typeset chrootDir="$1"
+
+	ammChroot::Stop "$chrootDir"
+	ammChroot::Destroy "$chrootDir"
 }
 
 
@@ -119,12 +104,12 @@ function main {
 	typeset action="${1:-}"; shift
 	typeset -i r=0
 
+	if [[ -z "${1:-}" ]]; then
+		echo >&2 "Usage: $0 $action <chrootdir> [action-specific options...]"
+		return 1
+	fi
+
 	case "$action" in
-		# List existing chroots
-		list)
-			chrootmgr::list "$@"
-			r=$?
-			;;
 
 		# Create a new chroot
 		create)
@@ -133,27 +118,64 @@ function main {
 			;;
 
 		destroy)
-			ammChroot::Stop "$CHR_ROOTDIR"
-			ammChroot::Destroy "$CHR_ROOTDIR"
-			r=$?
+			typeset dir
+			for dir in "$@"; do
+				if ammChroot::ChrootValidate "$dir"; then
+					ammChroot::Stop "$dir"
+					ammChroot::Destroy "$dir"
+					r+=$?
+				else
+					ammLog::Warning "Path '$dir' is not a valid chroot dir"
+				fi
+			done
 			;;
 
 		start)
-			ammChroot::Start "$CHR_ROOTDIR"
-			r=$?
+			typeset dir
+			for dir in "$@"; do
+				if ammChroot::ChrootValidate "$dir"; then
+					ammChroot::Start "$dir"
+					r+=$?
+				else
+					ammLog::Warning "Path '$dir' is not a valid chroot dir"
+				fi
+			done
 			;;
 
 		stop)
-			ammChroot::Stop "$CHR_ROOTDIR"
-			r=$?
+			typeset dir
+			for dir in "$@"; do
+				if ammChroot::ChrootValidate "$dir"; then
+					ammChroot::Stop "$dir"
+					r+=$?
+				else
+					ammLog::Warning "Path '$dir' is not a valid chroot dir"
+				fi
+			done
 			;;
 
-		enter)
-			
+		enter|exec)
+			if [[ -z "${1:-}" ]] || ! ammChroot::ChrootValidate "$1"; then
+				ammLog::Error "Invalid chroot '$dir'"
+				return 1
+			else
+				typeset dir="$1"; shift
+				ammChroot::Exec "$dir" "$@"
+				r=$?
+			fi
 			;;
+
+#		install)
+#			;;
 		*)
-			ammLog::Error "Unknown action '$action'"
-			r=1
+			# Empty action, show help
+			if [[ -z "$action" ]]; then
+				ammOptparse::Help "full"
+
+			else
+				ammLog::Error "Unknown action '$action'"
+				r=1
+			fi
 			;;
 	esac
 
