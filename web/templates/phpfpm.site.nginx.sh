@@ -4,7 +4,7 @@ function die { echo >&2 "$@"; exit 1; }
 
 
 # Required env-vars
-for var in SITE_{ROOT,FQDN} RUN_{USER,GROUP} HTTP_ALLOWED HTTPS_ENABLED; do
+for var in SITE_{ROOT,FQDN} RUN_{USER,GROUP}; do
 	eval "[[ -z "\$$var" ]] && die \"Undefined environment variable '$var'\""
 done
 
