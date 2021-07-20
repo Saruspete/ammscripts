@@ -4,7 +4,7 @@ function die { echo >&2 "$@"; exit 1; }
 
 
 # Required env-vars
-for var in SITE_{ROOT,FQDN,NAME,USER,GROUP} HTTP_ALLOWED HTTPS_ENABLED; do
+for var in SITE_{ROOT,FQDN,NAME} RUN_{USER,GROUP}; do
 	eval "[[ -z "\$$var" ]] && die \"Undefined environment variable '$var'\""
 done
 
@@ -21,13 +21,13 @@ cat <<EOT
 listen = $SITE_ROOT/priv/phpfpm.sock
 
 listen.allowed_clients = 127.0.0.1
-listen.owner = $SITE_USER
-listen.group = $SITE_GROUP
+listen.owner = $RUN_USER
+listen.group = $RUN_GROUP
 listen.mode = 0600
 
 ; Unix user/group of processes
-user = $SITE_USER
-group = $SITE_GROUP
+user = $RUN_USER
+group = $RUN_GROUP
 
 ; Process Manager
 ;pm = dynamic

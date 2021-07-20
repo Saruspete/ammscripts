@@ -3,7 +3,7 @@
 
 cat <<EOT
 
-user              $SITE_USER $SITE_GROUP;
+user              $RUN_USER $RUN_GROUP;
 worker_processes  auto;
 
 error_log         /var/log/nginx/error.log;
