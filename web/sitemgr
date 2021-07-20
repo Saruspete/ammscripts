@@ -25,8 +25,8 @@ typeset PATH_TEMP="$(ammLib::TmpPathGet)"
 typeset HTTPS_ENABLE="true"
 typeset HTTPS_FORCE="false"
 typeset HTTPS_PROVIDER="certbot"
-typeset SVC_NGINX="nginx"
-typeset SVC_PHPFPM="php-fpm"
+typeset NGX_SVC="nginx"
+typeset PHP_SVC="php-fpm"
 typeset SITE_USER="$(id -un)"
 typeset SITE_GROUP="$(id -gn)"
 
@@ -37,8 +37,8 @@ ammOptparse::AddOpt "-r|--root="           "Where the sites are located"   "$SIT
 ammOptparse::AddOpt "-t|--temp="           "Path for temporary files"      "$PATH_TEMP"
 
 ammOptparse::AddOptGroupDesc "Service management"
-ammOptparse::AddOpt    "--svc-nginx="      "Name of the nginx service"    "$SVC_NGINX"
-ammOptparse::AddOpt    "--svc-phpfpm="     "Name of the phpfpm service"   "$SVC_PHPFPM"
+ammOptparse::AddOpt    "--svc-nginx="      "Name of the nginx service"    "$NGX_SVC"
+ammOptparse::AddOpt    "--svc-phpfpm="     "Name of the phpfpm service"   "$PHP_SVC"
 ammOptparse::AddOpt    "--run-nginx-user="   "User to run nginx as"       "$SITE_USER"
 ammOptparse::AddOpt    "--run-nginx-group="  "Group to run nginx as"      "$SITE_GROUP"
 ammOptparse::AddOpt    "--run-phpfpm-user="  "User to run phpfpm as"      "%{run-nginx-user}"
@@ -63,12 +63,20 @@ fi
 SITES_ROOT="$(ammOptparse::Get "root")"
 PATH_TEMP="$(ammOptparse::Get "temp")"
 
-SVC_NGINX="$(ammOptparse::Get "svc-nginx")"
-SVC_PHPFPM="$(ammOptparse::Get "svc-phpfpm")"
-
 HTTPS_ENABLE="$(ammOptparse::Get "https-enable")"
 HTTPS_FORCE="$(ammOptparse::Get "https-force")"
 HTTPS_PROVIDER="$(ammOptparse::Get "https-provider")"
+
+# Nginx service
+NGX_SVC="$(ammOptparse::Get "svc-nginx")"
+NGX_RUN_USER="$(ammOptparse::Get "run-nginx-user")"
+NGX_RUN_GROUP="$(ammOptparse::Get "run-nginx-group")"
+
+# PHP-FPM service
+PHP_SVC="$(ammOptparse::Get "svc-phpfpm")"
+PHP_ENABLE="$(ammOptparse::Get "php-enable")"
+PHP_RUN_USER="$(ammOptparse::Get "run-phpfpm-user")"
+PHP_RUN_GROUP="$(ammOptparse::Get "run-phpfpm-group")"
 
 mkdir -p "$PATH_TEMP"
 
@@ -141,7 +149,7 @@ function pathCreate {
 	typeset dir
 	for dir in bin cron conf/nginx html/public logs/{nginx,apps} priv temp/{temp,nginx/{client_body,proxy_temp,fastcgi_temp},upload,session}; do
 		typeset dirpath="$sitesroot/$dirname/$dir"
-		[[ -d "$dirpath" ]] || mkdir --parents "$dirpath" 
+		[[ -d "$dirpath" ]] || mkdir --parents "$dirpath"
 	done
 
 	# Return root folder path
@@ -219,14 +227,15 @@ function confGenPhpfpm {
 
 	typeset scriptname
 	for scriptname in "${!mapping[@]}"; do
+		typeset dest="${mapping[$scriptname]}"
+		typeset temp="$PATH_TEMP/${dest##*/}.$$"
+		typeset script="$MYPATH/templates/$scriptname"
 
 		# Call the script
 		SITE_ROOT="$siteroot" \
 		SITE_FQDN="$sitefqdn" \
 		SITE_NAME="$sitename" \
-		HTTP_ALLOWED="$http_avail" \
-		HTTPS_ENABLED="$https_avail" \
-		"$script" >| "$temp"
+		"$scriptname" >| "$temp"
 
 		# check updates and backup if needed
 		if [[ -s "$dest" ]]; then
@@ -272,7 +281,7 @@ function certDeploy {
 	# Only letsencrypt is handled for now
 	typeset crt
 	for crt in "/etc/letsencrypt/live/$certdir/"*; do
-		# Avoid empty 
+		# Avoid empty
 		[[ -e "$crt" ]] || return 1
 
 		ln -s "$crt" "$destdir"
@@ -308,7 +317,7 @@ function siteCreate {
 	fi
 
 	# Reload to enable the domain
-	svcExec "reload" "nginx"
+	svcExec "reload" "$NGX_SVC"
 
 
 	# https enabled / available
@@ -321,7 +330,7 @@ function siteCreate {
 		confGenNginx "$sitepath" "$fqdn"
 
 		# Reload
-		svcExec "reload" "nginx"
+		svcExec "reload" "$NGX_SVC"
 	fi
 
 	# PHP-FPM Enable
