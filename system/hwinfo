@@ -14,29 +14,35 @@ done
 	exit 1
 }
 
-typeset LOG_QUIET="false"
-typeset OUT_CSV="false"
-typeset OUT_FILE=""
-
-
-ammLib::Require "table" "optparse" "syscfg" "syscfg.network" "network" "string" "hardware"
-
 # Check for user root, else issue a warning
 if [[ "$__AMMLIB_USERID" != "0" ]]; then
 	ammLog::Wrn "You are not running this script as root. Some detail may be missing"
 fi
+
+typeset LOG_QUIET="false"
+typeset OUT_CSV="false"
+typeset OUT_FULL="false"
+typeset OUT_FILE=""
+
+
+ammLib::Require "table" "optparse" "syscfg" "syscfg.network" "network" "string" "hardware"
 
 ammOptparse::AddOpt "--quiet!" "Should the non-data information be displayed" "$LOG_QUIET"
 
 ammOptparse::AddOptGroupDesc "Output formatting"
 ammOptparse::AddOpt "--csv!"   "Format output as CSV"     "$OUT_CSV"
 ammOptparse::AddOpt "--file="  "File to place output in"  "$OUT_FILE"
+ammOptparse::AddOpt "--full!"  "Do not filter out elements" "$OUT_FULL"
 
+ammOptparse::AddActionWord "continue" "all" "banner" "serial"
 
-ammOptparse::Parse --no-unknown || ammLog::Die "Bad options provided"
+ammOptparse::Parse || ammLog::Die "Bad options provided"
+eval set -- $(ammOptparse::GetUnparsedOpts)
 
 OUT_CSV="$(ammOptparse::Get "csv")"
 OUT_FILE="$(ammOptparse::Get "file")"
+OUT_FULL="$(ammOptparse::Get "full")"
+OUT_QUIET="$(ammOptparse::Get "quiet")"
 
 
 function _ramSizeConvert {
@@ -49,7 +55,7 @@ function _ramSizeConvert {
 #
 # System Overview
 #
-function showHardware {
+function showSystem {
 
 	ammTable::Create "Hardware" "Type|size:20" "Vendor|size:10%" "Model|size:fill" "Node" "Speed" "Drivers|size:20"
 	ammTable::SetDisplayMode "direct"
@@ -164,7 +170,7 @@ function showStorage {
 }
 
 
-showHardware
+showSystem
 showCPUMem
 showNetwork
 showStorage
