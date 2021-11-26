@@ -340,6 +340,7 @@ function siteCreate {
 	# PHP-FPM Enable
 	if ammString::IsTrue "$PHP_ENABLE"; then
 		confGenPhpfpm "$sitepath" "$fqdn"
+		svcExec "reload" "$PHP_SVC"
 	fi
 
 	return $r
