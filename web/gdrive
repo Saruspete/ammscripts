@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+if [[ "$ammpath" == "fail" ]]; then
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git $MYPATH'"
+	exit 1
+fi
+
+# From https://bytesbin.com/how-to-download-a-large-file-from-google-drive-quickly/
+
+# Load the required libraries
+ammLib::Require "optparse" "http"
+
+TMPDIR="$(ammLib::TmpPathGet)"
+
+
+for fileid in "$@"; do
+
+	typeset cookiejar="$TMPDIR/$fileid.cookiejar"
+
+	typeset metadata="$(ammHttp::Get "https://drive.google.com/uc?export=download&id=$fileid" "follow cookiejar=$cookiejar")"
+
+	# Extract the url to confirm large files
+	typeset confirm="${metadata#*uc-download-link*href=\"}"
+	confirm="${confirm%%\">*}"
+	confirm="${confirm//\&amp;/\&}"
+
+
+	# Extract the filename
+	typeset filename="${metadata#*open?id=*>}"
+	typeset filesize="$filename"
+	filename="${filename%%</a>*}"
+	filesize="${filesize#*</a> (}"
+	filesize="${filesize%%)*}"
+
+	ammLog::Info "Downloading: $filename ($filesize)"
+
+	# Fetch the file, using the jar in readonly
+	ammHttp::Fetch "https://drive.google.com${confirm}" "$filename" "follow cookieload=$cookiejar"
+
+done
