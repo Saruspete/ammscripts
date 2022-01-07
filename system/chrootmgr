@@ -29,11 +29,11 @@ ammLib::Require "pkg" "chroot" "optparse"
 
 # Early configuration parsing for help pre-filling
 ammOptparse::Parse "config"
-typeset CFG_FILE="$(ammOptparse::Get "config")"
+#typeset CFG_FILE="$(ammOptparse::Get "config")"
 
-if [[ -n "$CFG_FILE" ]]; then
-	:
-fi
+#if [[ -n "$CFG_FILE" ]]; then
+#	:
+#fi
 
 
 
