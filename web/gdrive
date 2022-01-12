@@ -24,9 +24,20 @@ TMPDIR="$(ammLib::TmpPathGet)"
 
 for fileid in "$@"; do
 
+	# Filter-out url if any
+	fileid="${fileid#*/file/d/}"
+	fileid="${fileid%%/*}"
+
 	typeset cookiejar="$TMPDIR/$fileid.cookiejar"
 
 	typeset metadata="$(ammHttp::Get "https://drive.google.com/uc?export=download&id=$fileid" "follow cookiejar=$cookiejar")"
+
+	# Act only on size, as it can be very large
+	typeset metadata2="${metadata//uc-download-link/}"
+	if [[ "${#metadata}" == "${#metadata2}" ]]; then
+		ammLog::Warning "Cannot find object with ID '$fileid'. Are its sharing settings set as 'anyone with the link?'"
+		continue
+	fi
 
 	# Extract the url to confirm large files
 	typeset confirm="${metadata#*uc-download-link*href=\"}"
