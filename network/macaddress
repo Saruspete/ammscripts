@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+
+typeset MYSELF="$(realpath $0)"
+typeset MYPATH="${MYSELF%/*}"
+
+# Load main library
+typeset -a ammpaths=("$MYPATH/ammlib" "$HOME/.ammlib" "/etc/ammlib")
+for ammpath in "${ammpaths[@]}" fail; do
+	[[ -e "$ammpath/ammlib" ]] && source "$ammpath/ammlib" && break
+done
+if [[ "$ammpath" == "fail" ]]; then
+	echo >&2 "Unable to find ammlib in paths '${ammpaths[@]}'"
+	echo >&2 "Download it with 'git clone https://github.com/Saruspete/ammlib.git $MYPATH'"
+	exit 1
+fi
+
+# Load the required libraries
+ammLib::Require "optparse" "string"
+
+
+typeset OUI_SRC="http://standards-oui.ieee.org/oui/oui.txt"
+typeset OUI_DST="$(ammLib::DataPathGet)/oui.txt"
+
+typeset MAC_PREFIX="DE:AD"
+
+
+ammOptparse::AddOptGroupDesc "Referential config"
+ammOptparse::AddOpt "--db-source="   "Where to fetch the OUI DB"          "$OUI_SRC"
+ammOptparse::AddOpt "--db-local="    "Path to local cache of the OUI DB"  "$OUI_DST"
+
+ammOptparse::AddOptGroupDesc "Ethernet MAC Address"
+ammOptparse::AddOpt "-p|--prefix="   "Prefix to use in MAC Generation"    "$MAC_PREFIX"
+
+
+ammOptparse::AddActionWord "break" "gen" "generate"
+ammOptparse::Parse --no-unknown || ammLog::Die "Error during option parsing"
+
+
+MAC_PREFIX="$(ammOptparse::Get "prefix")"
+OUI_SRC="$(ammOptparse::Get "db-source")"
+OUI_DST="$(ammOptparse::Get "db-local")"
+
+typeset -a MAC_LOCAL_PREFIX=(${MAC_PREFIX//:/ })
+
+
+function macaddress::Info {
+
+	# Blocks
+	# 01-80-C2
+	#   00-00-00: Spanning Tree (for bridges)
+	#   00-00-01: Ethernet Flow Control (pause frame / ethtool -A)
+	#   00-00-02: Slow protols and LACP
+	#   00-00-03: LLDP (additional) or 8021x EAPOL
+	#   00-00-08: Spanning Tree (for provider bridges)
+	#   00-00-0D: Multiple VLAN Registration (stacked vlan) 802.1ad 
+	#   00-00-0E: LLDP (primary) and PTP
+	#   00-00-21: GVRP & MVRP (vlan)
+	#   00-00-3x: CFM protocol 802.1ag
+	# 01-1B-19: PTP for grandmaster election
+	# 01-00-5E: IPv4 Multicast
+	# 33-33-xx: IPv6 Multicast
+	# 01-0C-CD
+	#   01-00-00: (to 01-FF) IEC 61850-8-1 GOOSE Type 1/1A 
+	#   02-00-00: (to 01-FF) IEC 61850 8-1 GSSE
+	#   04-00-00: (to 01-FF) IEC 61850 8-1 Multicast sampled values
+	# 01-00-0C:
+	#   CC-CC-CC: Cisco' CDP, VTP, UDLD
+	#   CC-CC-CD: Cisco' Shared spanning tree
+
+	:
+}
+
+
+# @description  Generates a virtual MAC Address based on provided ipv4
+# @arg string $1 IPv4 Address to use as base
+function macaddress::Generate {
+	typeset ip="${1:-}"
+	typeset pfx=${2:-${MAC_LOCAL_PREFIX[@]}}
+
+	typeset -a mac=() pfx=(${pfx//[^a-zA-Z0-9]/ })
+
+	if ammString::IsIPv4 "$ip"; then
+
+		mac=(00 00 $(ammString::IPv4ToHex "$ip" ":") )
+
+		# IPv4 mcast prefix is "01:00:5E"
+		if ammString::IPv4IsMulticast "$ip"; then
+			mac[0]="01"
+			mac[1]="00"
+			mac[2]="5E"
+			# Only use 23 bits of IPv4
+			# story: https://networklessons.com/multicast/multicast-ip-address-to-mac-address-mapping
+			mac[3]="$( ammString::BitfieldAnd "${mac[3]}" "0x7F" )"
+
+		# use the provided prefix to override
+		else
+			typeset -i i=0
+			typeset p=
+			for p in "${pfx[@]}"; do
+				mac[$i]="$p"
+				i+=1
+			done
+		fi
+
+	elif ammString::IsIPv6 "$ip"; then
+
+		typeset -a ip2hex=( $(ammString::IPv6ToHex "$ip") )
+		mac=(${ip2hex[10]} ${ip2hex[11]} ${ip2hex[12]} ${ip2hex[13]} ${ip2hex[14]} ${ip2hex[15]})
+		if ammString::IPv6IsMulticast "$ip"; then
+			# 2 most significant bytes are "33"
+			mac[0]="33"
+			mac[1]="33"
+		fi
+	fi
+
+	ammString::Glue ':' ${mac[@]}
+}
+
+
+typeset action="${1:-}"
+shift 1
+
+
+case "$action" in
+	gen|generate)
+		macaddress::Generate "${1:-}"
+		;;
+
+	'')
+		$0 --help
+		;;
+
+	*)
+		ammLog::Die "Unknown action '$action'"
+		;;
+esac
