@@ -25,7 +25,7 @@ typeset OUT_FULL="false"
 typeset OUT_FILE=""
 
 
-ammLib::Require "table" "optparse" "syscfg" "syscfg.network" "network" "string" "hardware"
+ammLib::Require "string" "table" "optparse" "syscfg" "syscfg.network" "network" "hardware"
 
 ammOptparse::AddOpt "--quiet!" "Should the non-data information be displayed" "$LOG_QUIET"
 
@@ -92,13 +92,13 @@ function showSystem {
 		# Get more details
 		typeset driver= current_link_speed= max_link_speed= current_link_width= max_link_width=
 		typeset irq= numa_node= enable=
-		eval "$(ammHardware::DeviceDetail $pciid)"
+		eval "$(ammHardware::PciDeviceDetail $pciid)"
 
 		typeset speed=""
 		[[ -n "$current_link_width" ]] && speed+="$current_link_width/$max_link_width"
 
 		ammTable::AddRow "$devtype" "$vendor" "$device" "$numa_node" "$speed" "$driver"
-	done < <(ammHardware::DeviceSummary)
+	done < <(ammHardware::PciDeviceSummary)
 
 }
 
@@ -107,7 +107,7 @@ function showSystem {
 #
 function showCPUMem {
 	echo
-	ammTable::Create "CPU and Memory"  "NUMA" "CPU Model|size:40" "CPU ucode rev" "RAM MB|size:8,callback:_ramSizeConvert" "CPU IDs|size:fill,overflow:wrap"
+	ammTable::Create "NUMA Nodes"  "NUMA" "CPU Model|size:40" "CPU ucode rev" "RAM MB|size:8,callback:_ramSizeConvert" "CPU IDs|size:fill,overflow:wrap"
 	ammTable::SetDisplayMode "direct"
 
 	typeset line
@@ -117,8 +117,16 @@ function showCPUMem {
 		ammTable::AddRow "$numanode" "$cpumodel" "$cpuucode" "$memsize" "$cpuids"
 	done < <(ammHardware::NumaSummary)
 
+	echo
+	ammTable::Create "Memory DIMMs"  "Slot|size:20" "Type" "Size|size:6" "Speed|size:16" "Rank" "Vendor|size:32" "Model|size:32" "Serial|size:fill"
+	ammTable::SetDisplayMode "direct"
 	while read line; do
-		echo "$line"
+		typeset slot= size= type= form= rank= vendor= model= serial= speed= speedmax=
+		eval "$line"
+		speedstr="$speed"
+		[[ "$speed" != "$speedmax" ]] && speedstr="${speed% *} (max: ${speedmax% *})"
+		ammTable::AddRow "$slot" "$type" "$size" "$speedstr" "$rank" "$vendor" "$model" "$serial"
+
 	done < <(ammHardware::MemoryDetail)
 
 }
@@ -129,7 +137,7 @@ function showCPUMem {
 #
 function showNetwork {
 	echo
-	ammTable::Create "NIC Details"  "NIC|size:16" "Type|size:8" "Driver|size:10" "MAC Address|size:18" "Speed" "Dplx" "Medium" "IPv4|size:18"
+	ammTable::Create "NIC Details"  "NIC|size:16" "Type|size:8" "Driver|size:10" "MAC Address|size:18" "Speed" "Dplx" "Medium|size:8" "IPv4|size:18"
 	ammTable::SetDisplayMode "direct"
 
 	typeset nic
