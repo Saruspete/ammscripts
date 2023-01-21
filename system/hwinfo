@@ -24,8 +24,15 @@ typeset OUT_CSV="false"
 typeset OUT_FULL="false"
 typeset OUT_FILE=""
 
+typeset -a BANNER_FIELDS=()
+typeset -a BANNER_LOGO_LINES=()
+typeset -i BANNER_LOGO_STRMAX=0
+typeset BANNER_FIELDS_STR=""
+typeset BANNER_LOGO=""
+typeset BANNER_PREPEND=""
+typeset BANNER_APPEND=""
 
-ammLib::Require "string" "table" "optparse" "syscfg" "syscfg.network" "network" "hardware"
+ammLib::Require "string" "table" "optparse" "syscfg" "syscfg.network" "network" "hardware" "storage"
 
 ammOptparse::AddOpt "--quiet!" "Should the non-data information be displayed" "$LOG_QUIET"
 
@@ -33,6 +40,14 @@ ammOptparse::AddOptGroupDesc "Output formatting"
 ammOptparse::AddOpt "--csv!"   "Format output as CSV"     "$OUT_CSV"
 ammOptparse::AddOpt "--file="  "File to place output in"  "$OUT_FILE"
 ammOptparse::AddOpt "--full!"  "Do not filter out elements" "$OUT_FULL"
+
+ammOptparse::AddOptGroupDesc "Banner options"
+#ammOptparse::AddOpt "-F|--banner-fields@"  "List of fields to place in banner"       "$BANNER_FIELDS_STR"
+ammOptparse::AddOpt "-L|--banner-logo="    "Path to ASCII logo to add on the left"   "$BANNER_LOGO"
+ammOptparse::AddOpt    "--banner-prepend=" "text or file to add before the banner"   "$BANNER_PREPEND"
+ammOptparse::AddOpt    "--banner-append="  "text or file to add after the banner"    "$BANNER_APPEND"
+# ammOptparse::AddNote "
+
 
 ammOptparse::AddActionWord "continue" "all" "banner" "serial"
 
@@ -43,6 +58,142 @@ OUT_CSV="$(ammOptparse::Get "csv")"
 OUT_FILE="$(ammOptparse::Get "file")"
 OUT_FULL="$(ammOptparse::Get "full")"
 OUT_QUIET="$(ammOptparse::Get "quiet")"
+
+BANNER_PREPEND="$(ammOptparse::Get "banner-prepend")"
+BANNER_APPEND="$(ammOptparse::Get "banner-append")"
+BANNER_LOGO="$(ammOptparse::Get "banner-logo")"
+
+
+
+# Replace string with files if existing
+[[ -n "$BANNER_PREPEND" ]] && [[ -s "$BANNER_PREPEND" ]] && BANNER_PREPEND="$(< "$BANNER_PREPEND")"
+[[ -n "$BANNER_APPEND" ]]  && [[ -s "$BANNER_APPEND" ]]  && BANNER_APPEND="$(< "$BANNER_APPEND")"
+
+# Replace with logo
+if [[ -n "$BANNER_LOGO" ]]; then
+	[[ -s "$BANNER_LOGO" ]] || ammLog::Die "The banner logo is not a valid file: '$BANNER_LOGO'"
+
+	# Read the array, and select the longest line
+	readarray -t BANNER_LOGO_LINES < "$BANNER_LOGO" || ammLog::Die "Cannot read banner logo '$BANNER_LOGO'"
+	for line in "${BANNER_LOGO_LINES[@]}"; do
+		[[ "${#line}" -gt $BANNER_LOGO_STRMAX ]] && BANNER_LOGO_STRMAX="${#line}"
+	done
+fi
+
+
+#
+# Banner generation
+#
+function generateBanner {
+
+	typeset line=""
+
+	eval "typeset $(ammHardware::NumaSummary)"
+	eval "typeset $(ammHardware::SystemSummary | tr "\n" " ")"
+
+	#
+	# CPU Processing
+	#
+	typeset cpucountStr=$cpucount
+	if [[ -n "$cpusmt" ]] && [[ "$cpusmt" -gt 1 ]]; then
+		cpucountStr="$(( $cpucount / ${cpusmt:-1} )) (*$cpusmt)"
+	fi
+
+	cpumodel="${cpumodel#Intel(R) }"
+	cpumodel="${cpumodel//Core(TM) /}"
+	cpumodel="${cpumodel//(R)/}"
+	cpumodel="${cpumodel// CPU / }"
+	cpumodel="${cpumodel%@ *}"
+
+
+	typeset cpufreq="$(ammHardware::CpuFrequencyGetBasefreq)"
+	cpufreq="$(( $cpufreq / 1000))"
+
+	#
+	# RAM Processing
+	#
+	typeset ramList=""
+	typeset -A ramDimms=()
+	while read line; do
+		[[ -z "${line// /}" ]] && continue
+		eval "typeset $line"
+
+		ramDimms[$size]=$(( ${ramDimms[$size]:-} + 1 ))
+	done < <(ammHardware::MemoryDetail)
+	for line in "${!ramDimms[@]}"; do
+		ramList+="${ramDimms[$line]}*${line} "
+	done
+	ramList="${ramList% }"
+
+	#
+	# Block devices
+	#
+	typeset -a blockdevs=()
+	typeset blockdev=
+	for blockdev in $(ammStorage::ListAvail); do
+		typeset blocktype="$(ammStorage::GetType "$blockdev")"
+		# List only physical devices
+		[[ $blocktype =~ disk|nvme ]] || continue
+
+		blockdevs+=("$(printf "%-8.8s  %5.5s GB  %s\n"  "$blockdev" "$(ammString::UnitConvert "$(ammStorage::GetSize "$blockdev")" "B" "GB")" "$(ammStorage::GetModel "$blockdev") / $(ammStorage::GetSerial "$blockdev")" )")
+	done
+	#
+	# Network
+	#
+	typeset -a nics=()
+	typeset iface=
+	for iface in $(ammSyscfgNetwork::NicGet); do
+
+		eval "typeset $(ammSyscfgNetwork::NicInfo "$iface"| tr "\n" " ")"
+		#eval "typeset $(ammSyscfgNetwork::CableInfo "$iface"| tr -d "\n")"
+
+		nics+=("$(printf "  %-15.15s %17.17s %3.3s Gb %10.10s\n" "$iface" "${mac:-}" "$((${speed}/1000))" "$driver")")
+	done
+
+
+	# Generate the banner fields
+	BANNER_FIELDS=(
+		"Host:   $(hostname --fqdn)"
+		"Model:  $system_manufacturer $system_product_name"
+		"Serial: $system_serial_number"
+		""
+		"CPU:    $cpucountStr * $cpumodel (${cpufreq} MHz)"
+		"RAM:    $(_ramSizeConvert "$memsize") MB ($ramList)"
+		""
+		"Block-devices:"
+		"${blockdevs[@]}"
+		""
+		"NICs:"
+		"${nics[@]}"
+	)
+
+	#
+	# DO the display
+	#
+
+	# Prepend
+	[[ -n "$BANNER_PREPEND" ]] && echo "$BANNER_PREPEND"
+
+	# Set the max count of lines to be generated
+	typeset -i maxLines="${#BANNER_FIELDS[@]}"
+	[[ "${#BANNER_LOGO_LINES[@]}" -gt "$maxLines" ]] && maxLines="${#BANNER_LOGO_LINES[@]}"
+
+	typeset -i lineNum=
+	for (( lineNum=0; lineNum < maxLines; lineNum++ )); do
+		echo "${BANNER_LOGO_LINES[$lineNum]:-}${BANNER_FIELDS[$lineNum]:-}"
+	done
+
+
+	[[ -n "$BANNER_APPEND" ]] && echo "$BANNER_APPEND"
+
+}
+
+
+
+#
+# Get fields
+#
+
 
 
 function _ramSizeConvert {
@@ -177,9 +328,30 @@ function showStorage {
 
 }
 
+if [[ -z "${1:-}" ]]; then
+	ammLog::Error "Usage: $0 <banner|all|system|cpu|network|storage>"
+	exit 1
 
-showSystem
-showCPUMem
-showNetwork
-showStorage
+else
+	while [[ -n "${1:-}" ]]; do
+		case "$1" in
+			banner)
+				generateBanner
+				;;
+			all|'')
+				showSystem
+				showCPUMem
+				showNetwork
+				showStorage
+				;;
+			*)
+				ammLog::Error "Unknown element to display '$1'"
+				;;
+		esac
+		shift
+	done
+
+fi
+
+
 
