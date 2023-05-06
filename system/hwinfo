@@ -147,7 +147,13 @@ function generateBanner {
 		eval "typeset $(ammSyscfgNetwork::NicInfo "$iface"| tr "\n" " ")"
 		#eval "typeset $(ammSyscfgNetwork::CableInfo "$iface"| tr -d "\n")"
 
-		nics+=("$(printf "  %-15.15s %17.17s %3.3s Gb %10.10s\n" "$iface" "${mac:-}" "$((${speed}/1000))" "$driver")")
+		typeset extra="$driver"
+		# If there's no driver, show its type
+		if [[ -z "$extra" ]]; then
+			extra+="$(ammSyscfgNetwork::NicType "$iface")"
+		fi
+
+		nics+=("$(printf "  %-15.15s %17.17s %3.3s Gb %10.10s\n" "$iface" "${mac:-}" "$((${speed}/1000))" "$extra")")
 	done
 
 
@@ -352,6 +358,4 @@ else
 	done
 
 fi
-
-
 
