@@ -88,6 +88,14 @@ function generateBanner {
 
 	typeset line=""
 
+	#
+	# Systeme Host
+	#
+	typeset host_name="$(hostname --fqdn 2>/dev/null || uname -n)"
+
+	#
+	# NUMA Hardware
+	#
 	typeset -i numanode=0 cpucount=0 cpucountTot= cpusmt= memsize= memsizeTot=
 	while read line; do
 		eval "typeset $line"
@@ -145,6 +153,18 @@ function generateBanner {
 	#
 	# Network
 	#
+	
+	# Get main IP address
+	typeset -l ip= what= _junk= ip4main= ip6main=
+	while read ip what _junk; do
+		[[ "$what" == "stream" ]] || continue
+		if ammString::IsIPv6 "$ip"; then
+			ip6main="$ip"
+		else
+			ip4main="$ip"
+		fi
+	done < <(getent ahosts $host_name)
+
 	typeset -a nics=()
 	typeset iface=
 	for iface in $(ammSyscfgNetwork::NicGet); do
@@ -185,17 +205,27 @@ function generateBanner {
 				# Remove cidr
 				ip="${ip%/*}"
 
+				typeset extra=""
 				typeset -i strmax=15
 
 				# Skip private / auto-assigned IPv6
 				if ammString::IsIPv6 "$ip"; then
 					strmax=39
 					ammString::IsIPv6Local "$ip" && continue
+
+					[[ "$ip" == "$ip6main" ]] && extra="**"
+				else
+					[[ "$ip" == "$ip4main" ]] && extra="**"
 				fi
+
+				# If main IP, show somethin
 
 				typeset _junk= rev= _junk=
 				read _junk rev _junk < <(getent hosts "$ip")
-				nics+=("$(printf "    %-${strmax}.${strmax}s %s\n" "$ip" "$rev")")
+
+				# If we have an extra for the main IP, add it to printf max
+				[[ -n "$extra" ]] && strmax+="$((${#extra} * 2))"
+				nics+=("$(printf "    %-${strmax}.${strmax}s %s\n" "${extra}${ip}${extra}" "$rev")")
 
 			done
 		done < <(ip -brief address show dev "$iface")
@@ -205,7 +235,7 @@ function generateBanner {
 	# Generate the banner fields
 	BANNER_FIELDS=(
 		# hostname provided 
-		"Host:   $(hostname --fqdn 2>/dev/null || uname -n)"
+		"Host:   $host_name"
 		"Model:  $system_manufacturer $system_product_name"
 		"Serial: ${system_serial_number// /}"
 		""
