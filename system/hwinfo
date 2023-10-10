@@ -88,15 +88,20 @@ function generateBanner {
 
 	typeset line=""
 
-	eval "typeset $(ammHardware::NumaSummary)"
+	typeset -i numanode=0 cpucount=0 cpucountTot= cpusmt= memsize= memsizeTot=
+	while read line; do
+		eval "typeset $line"
+		cpucountTot+=$cpucount
+		memsizeTot+=$memsize
+	done < <(ammHardware::NumaSummary)
 	eval "typeset $(ammHardware::SystemSummary | tr "\n" " ")"
 
 	#
 	# CPU Processing
 	#
-	typeset cpucountStr=$cpucount
+	typeset cpucountStr=$cpucountTot
 	if [[ -n "$cpusmt" ]] && [[ "$cpusmt" -gt 1 ]]; then
-		cpucountStr="$(( $cpucount / ${cpusmt:-1} )) (*$cpusmt)"
+		cpucountStr="$(( $cpucountTot / ${cpusmt:-1} )) (*$cpusmt)"
 	fi
 
 	cpumodel="${cpumodel#Intel(R) }"
@@ -205,7 +210,7 @@ function generateBanner {
 		"Serial: ${system_serial_number// /}"
 		""
 		"CPU:    $cpucountStr * $cpumodel (${cpufreq} MHz)"
-		"RAM:    $(_ramSizeConvert "$memsize") MB ($ramList)"
+		"RAM:    $(_ramSizeConvert "$memsizeTot") MB ($ramList)"
 		""
 		"Block-devices:"
 		"${blockdevs[@]}"
