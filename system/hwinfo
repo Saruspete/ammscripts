@@ -16,7 +16,7 @@ done
 
 # Check for user root, else issue a warning
 if [[ "$__AMMLIB_USERID" != "0" ]]; then
-	ammLog::Wrn "You are not running this script as root. Some detail may be missing"
+	ammLog::Warning "You are not running this script as root. Some detail may be missing"
 fi
 
 typeset LOG_QUIET="false"
@@ -159,9 +159,10 @@ function generateBanner {
 
 	# Generate the banner fields
 	BANNER_FIELDS=(
-		"Host:   $(hostname --fqdn)"
+		# hostname provided 
+		"Host:   $(hostname --fqdn 2>/dev/null || uname -n)"
 		"Model:  $system_manufacturer $system_product_name"
-		"Serial: $system_serial_number"
+		"Serial: ${system_serial_number// /}"
 		""
 		"CPU:    $cpucountStr * $cpumodel (${cpufreq} MHz)"
 		"RAM:    $(_ramSizeConvert "$memsize") MB ($ramList)"
@@ -184,9 +185,13 @@ function generateBanner {
 	typeset -i maxLines="${#BANNER_FIELDS[@]}"
 	[[ "${#BANNER_LOGO_LINES[@]}" -gt "$maxLines" ]] && maxLines="${#BANNER_LOGO_LINES[@]}"
 
-	typeset -i lineNum=
+	typeset -i lineNum= lineSizeLast=0 lineSizeCurr=0
 	for (( lineNum=0; lineNum < maxLines; lineNum++ )); do
-		echo "${BANNER_LOGO_LINES[$lineNum]:-}${BANNER_FIELDS[$lineNum]:-}"
+		echo "${BANNER_LOGO_LINES[$lineNum]:-$(ammString::Repeat $lineSizeLast)}${BANNER_FIELDS[$lineNum]:-}"
+
+		# align lines after the logo
+		lineSizeCurr="${#BANNER_LOGO_LINES[$lineNum]}"
+		[[ "$lineSizeCurr" -gt 0 ]] && lineSizeLast=$lineSizeCurr
 	done
 
 
@@ -217,27 +222,32 @@ function showSystem {
 	ammTable::Create "Hardware" "Type|size:20" "Vendor|size:10%" "Model|size:fill" "Node" "Speed" "Drivers|size:20"
 	ammTable::SetDisplayMode "direct"
 
+
 	typeset t line
 	# DMI Elements
-	for t in chassis system bios; do
-		typeset vendor="" model="" version="" serial=""
-		while IFS=: read key val; do
-			key="$(ammString::Trim "$key")"
-			val="$(ammString::Trim "$val")"
-			case $key in
-				Manufacturer|Vendor) vendor="$val" ;;
-				Product\ Name) model="$val" ;;
-				Version)       version="$val" ;;
-				Serial\ Number) serial="$val" ;;
-				Release\ Date)  model="$val" ;;
-			esac
+	if ammExec::Exists dmidecode; then
+		for t in chassis system bios; do
+			typeset vendor="" model="" version="" serial=""
+			while IFS=: read key val; do
+				key="$(ammString::Trim "$key")"
+				val="$(ammString::Trim "$val")"
+				case $key in
+					Manufacturer|Vendor) vendor="$val" ;;
+					Product\ Name) model="$val" ;;
+					Version)       version="$val" ;;
+					Serial\ Number) serial="$val" ;;
+					Release\ Date)  model="$val" ;;
+				esac
 
-		done < <(dmidecode -t "$t" 2>/dev/null)
+			done < <(ammExec::AsRoot dmidecode -t "$t" 2>/dev/null)
 
-		[[ -n "$version" ]] && model+=" / Version: $version"
-		[[ -n "$serial" ]] && model+="  / Serial: $serial"
-		ammTable::AddRow "$t" "$vendor" "$model"
-	done
+			[[ -n "$version" ]] && model+=" / Version: $version"
+			[[ -n "$serial" ]] && model+="  / Serial: $serial"
+			ammTable::AddRow "$t" "$vendor" "$model"
+		done
+	else
+		ammLog::Warning "Missing binary 'dmidecode'"
+	fi
 	# PCI Devices
 	while read line; do
 		typeset pciid= devtype= vendor= version= device= driver=
