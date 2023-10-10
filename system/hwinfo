@@ -150,10 +150,50 @@ function generateBanner {
 		typeset extra="$driver"
 		# If there's no driver, show its type
 		if [[ -z "$extra" ]]; then
-			extra+="$(ammSyscfgNetwork::NicType "$iface")"
+			typeset nicType="$(ammSyscfgNetwork::NicType "$iface")"
+			extra+="$nicType"
+
+#			case $nicType in
+#				# Add lower devices in the bridge
+#				bridge)
+#					typeset lowIface=
+#					for lowIface in /sys/class/
+#					;;
+#			esac
+
 		fi
 
+		# Skip virtual, ephemeral and per-vm bridges (eg proxmox)
+		case $iface in
+			fwbr[0-9]*|fwln[0-9]*|fwpr[0-9]*|tap[0-9]*)
+				continue
+				;;
+		esac
+
+		# Add the iface to the list
 		nics+=("$(printf "  %-15.15s %17.17s %3.3s Gb %10.10s\n" "$iface" "${mac:-}" "$((${speed}/1000))" "$extra")")
+
+		# Get IP addresses for each of these NICs
+		typeset ip= ips= _junk=
+		while read _junk _junk ips; do
+			for ip in $ips; do
+				# Remove cidr
+				ip="${ip%/*}"
+
+				typeset -i strmax=15
+
+				# Skip private / auto-assigned IPv6
+				if ammString::IsIPv6 "$ip"; then
+					strmax=39
+					ammString::IsIPv6Local "$ip" && continue
+				fi
+
+				typeset _junk= rev= _junk=
+				read _junk rev _junk < <(getent hosts "$ip")
+				nics+=("$(printf "    %-${strmax}.${strmax}s %s\n" "$ip" "$rev")")
+
+			done
+		done < <(ip -brief address show dev "$iface")
 	done
 
 
