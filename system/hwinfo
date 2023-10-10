@@ -82,6 +82,28 @@ fi
 
 
 #
+# NICs we don't want in banner (eg, tap, hypervisor bridge, etc..)
+#
+function bannerNicFilter {
+	typeset str="$@"
+
+	typeset strFiltered=""
+	for iface in $str; do
+		# Skip virtual, ephemeral and per-vm bridges (eg proxmox)
+		case $iface in
+			fwbr[0-9]*|fwln[0-9]*|fwpr[0-9]*|tap[0-9]*)
+				continue
+				;;
+		esac
+
+		strFiltered+=" $iface"
+	done
+
+	echo "${strFiltered# }"
+}
+
+
+#
 # Banner generation
 #
 function generateBanner {
@@ -169,6 +191,10 @@ function generateBanner {
 	typeset iface=
 	for iface in $(ammSyscfgNetwork::NicGet); do
 
+		# Skip unwanted NICs
+		[[ -z "$(bannerNicFilter "$iface")" ]] && continue
+
+
 		eval "typeset $(ammSyscfgNetwork::NicInfo "$iface"| tr "\n" " ")"
 		#eval "typeset $(ammSyscfgNetwork::CableInfo "$iface"| tr -d "\n")"
 
@@ -177,23 +203,11 @@ function generateBanner {
 		if [[ -z "$extra" ]]; then
 			typeset nicType="$(ammSyscfgNetwork::NicType "$iface")"
 			extra+="$nicType"
-
-#			case $nicType in
-#				# Add lower devices in the bridge
-#				bridge)
-#					typeset lowIface=
-#					for lowIface in /sys/class/
-#					;;
-#			esac
-
 		fi
 
-		# Skip virtual, ephemeral and per-vm bridges (eg proxmox)
-		case $iface in
-			fwbr[0-9]*|fwln[0-9]*|fwpr[0-9]*|tap[0-9]*)
-				continue
-				;;
-		esac
+		# Show upper NIC if attached
+		[[ -n "$upper" ]] && extra+="  upper($upper)"
+		[[ -n "$lowers" ]] && extra+="  lowers($(bannerNicFilter "$lowers"))"
 
 		# Add the iface to the list
 		nics+=("$(printf "  %-15.15s %17.17s %3.3s Gb %s\n" "$iface" "${mac:-(N/A)}" "$((${speed}/1000))" "$extra")")
